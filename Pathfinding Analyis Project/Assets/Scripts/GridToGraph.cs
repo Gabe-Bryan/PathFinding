@@ -1,9 +1,11 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 using static Graph<UnityEngine.Vector3Int>;
 using static Graph<UnityEngine.Vector3Int>.Node;
+using Debug = UnityEngine.Debug;
 
 public class GridToGraph : MonoBehaviour
 {
@@ -12,44 +14,87 @@ public class GridToGraph : MonoBehaviour
     private Graph<Vector3Int> myGraph;
     private Vector2 size;
     private Dictionary<Vector3Int, Node> nodes;
+
+    private LinkedList<Node> processOrder;
+    private LinkedListNode<Node> startHere;
+    private LinkedListNode<Node> endHere;
+
+    private Stopwatch greedyStopwatch;
+    private Stopwatch dijkstraStopwatch;
+
+    bool processing = false;
+
     private void Start()
     {
         GenerateGraph();
+        SetUpProcessOrder();
+        greedyStopwatch = new Stopwatch();
+        dijkstraStopwatch = new Stopwatch();
+        ///Debug.Log("Number of Vertices: " + nodes.Count);
+        //RunExample();
+    }
+
+    private void Update()
+    {
+        if (processing && greedyStopwatch != null && dijkstraStopwatch != null) TestNextPath();
+        else if (processing && (greedyStopwatch == null || dijkstraStopwatch == null)) Debug.LogError("A stopwatch is set to null!");
     }
 
     private Graph<Vector3Int> GenerateGraph() {
         Tilemap tilemap = gameObject.GetComponentInChildren<Tilemap>();
         size = tilemap.cellSize;
-        BoundsInt mapBounds = tilemap.cellBounds;
-        Debug.Log("X: " + (mapBounds.xMax - mapBounds.xMin) + " Y: " + (mapBounds.yMax - mapBounds.yMin));
 
         myGraph = new Graph<Vector3Int>(new ArrayList());
 
-        /*Vector3Int[] neighbors = FindNeighbors(FindTopLeftTile(tilemap), tilemap);
-        for (int i = 0; i < neighbors.Length; i++) {
-            if(neighbors[i] != null) Debug.Log("Neighbor[" + i + "]: " + tilemap.GetTile(neighbors[i]));// + " and it costs: " + BaseTileCost(neighbors[i]));
-        }*/
         GenerateNodes(tilemap);
-        foreach (KeyValuePair<Vector3Int, Node> keyNNode in nodes) {
-            //Debug.Log(keyNNode.Key + " " + keyNNode.Value);
-            GenerateNodeEdges(keyNNode.Key, tilemap);
-            myGraph.Add(keyNNode.Value);
-        }
-        Stack<Node> path;
-        float cost = myGraph.Dijkstras(nodes[new Vector3Int(1, -9, 0)], nodes[new Vector3Int(1, 9, 0)], out path);
-        string pathChosen = "";
-        pathChosen += path.Pop().GetValue();
-        while (path.Count != 0) pathChosen += ", " + path.Pop().GetValue();
-        Debug.Log("Cost for tilemap path (Dijkstras): " + cost + "\nPath:" + pathChosen);
-
-        //Greedy
-        Stack<Node> greedyPath;
-        float greedyCost = myGraph.GreedyFirstSearch(nodes[new Vector3Int(1, -9, 0)], nodes[new Vector3Int(1, 9, 0)], out greedyPath);
-        Debug.Log("Greedy cost: " + greedyCost);
 
         return myGraph;
     }
+    private void SetUpProcessOrder() {
+        if (nodes == null) { Debug.LogError("The nodes list has not been initializied"); return; }
+        
+        processOrder = new LinkedList<Node>();
 
+        foreach (KeyValuePair<Vector3Int, Node> keyNNode in nodes) {
+            processOrder.AddFirst(keyNNode.Value);
+        }
+        startHere = processOrder.First;
+        endHere = startHere.Next;
+
+        processing = true;
+    }
+    private void TestNextPath() {
+        Debug.Log("Testing...");
+        //finished case
+        if (startHere == null) {
+            Debug.Log("Dijkstra's took " + dijkstraStopwatch.ElapsedMilliseconds + " milis");
+            Debug.Log("Greedy first search took " + greedyStopwatch.ElapsedMilliseconds + " milis");
+            processing = false;
+        }
+        //finished with start node case
+        if (endHere == null) {
+            startHere = startHere.Next;
+            endHere = processOrder.First;
+        }
+        if (endHere != null && startHere != null) {
+            Stack<Node> path;
+
+            dijkstraStopwatch.Start();
+            myGraph.Dijkstras(startHere.Value, endHere.Value, out path);
+            dijkstraStopwatch.Stop();
+
+            greedyStopwatch.Start();
+            myGraph.GreedyFirstSearch(startHere.Value, endHere.Value, out path);
+            greedyStopwatch.Stop();
+
+            endHere = endHere.Next;
+            if (endHere != null && startHere.Value == endHere.Value)
+            {
+                endHere = endHere.Next;
+            }
+        }
+    }
+    
     private void GenerateNodes(Tilemap tilemap) {
         nodes = new Dictionary<Vector3Int, Node>();
         Vector3Int tilePos = FindTopLeftTile(tilemap);
@@ -66,6 +111,12 @@ public class GridToGraph : MonoBehaviour
                 else { tilePos = extraRight; }
             }
         } while (tilemap.HasTile(tilePos));
+        //Generate edges
+        foreach (KeyValuePair<Vector3Int, Node> keyNNode in nodes)
+        {
+            GenerateNodeEdges(keyNNode.Key, tilemap);
+            myGraph.Add(keyNNode.Value);
+        }
     }
 
     private void GenerateNodeEdges(Vector3Int tilePos, Tilemap tilemap) {
@@ -81,11 +132,6 @@ public class GridToGraph : MonoBehaviour
                 Debug.Log("Failure: " + i);
             }
         }
-        /*string edges = "";
-        foreach (Edge edge in nodes[tilePos].edges) {
-            edges += edge.weight + "\n";
-        }
-        Debug.Log("Edges for " + tilePos + " has " + nodes[tilePos].edges.Count + " edges: \n" + edges);*/
     }
 
     private Vector3Int[] FindNeighbors(Vector3Int tilePos, Tilemap tilemap) {
@@ -152,6 +198,7 @@ public class GridToGraph : MonoBehaviour
             case "Grass": return 1.0f;
             case "Desert": return 2.0f;
             case "Forest": return 3.0f;
+            case "Random": return Random.value * 100;
             default: return 1000000000000;
         }
     }
@@ -163,5 +210,25 @@ public class GridToGraph : MonoBehaviour
         string endName = tilemap.GetTile(end).name;
         if (startName.Equals("Water") ^ endName.Equals("Water")) return Mathf.Max(startCost, endCost) * 3;
         else return endCost;
+    }
+
+    private void RunExample() {
+        Stack<Node> path;
+        float dijkstraCost = myGraph.Dijkstras(nodes[new Vector3Int(1, -9, 0)], nodes[new Vector3Int(1, 9, 0)], out path);
+        string pathString = path.Count != 0 ? path.Pop().GetValue().ToString() : "";
+        while (path.Count != 0)
+        {
+            pathString += ", " + path.Pop().GetValue().ToString();
+        }
+        Debug.Log("Dijkstra got a total cost of: " + dijkstraCost + "\nPath Taken: " + pathString);
+
+
+        float greedyCost = myGraph.GreedyFirstSearch(nodes[new Vector3Int(1, -9, 0)], nodes[new Vector3Int(1, 9, 0)], out path);
+        pathString = path.Count != 0 ? path.Pop().GetValue().ToString() : "";
+        while (path.Count != 0)
+        {
+            pathString += ", " + path.Pop().GetValue().ToString();
+        }
+        Debug.Log("GFS got a total cost of: " + greedyCost + "\nPath Taken: " + pathString);
     }
 }

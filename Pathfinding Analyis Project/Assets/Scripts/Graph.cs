@@ -39,36 +39,35 @@ public class Graph<T>
      */
     public float GreedyFirstSearch(Node start, Node end, out Stack<Node> path) {
         //create OPEN and CLOSED list
-        Dictionary<Node, Node> parents = new Dictionary<Node, Node>();
-        Dictionary<Node, float> open = new Dictionary<Node, float>();
+        Dictionary<Node, KeyValuePair<Node, float>> parents = new Dictionary<Node, KeyValuePair<Node, float>>();
+        PriorityQueue<Node, float> open = new PriorityQueue<Node, float>();
         Dictionary<Node, float> closed = new Dictionary<Node, float>();
         
         path = new Stack<Node>();
 
-        open.Add(start, 0);
+        open.Enqueue(start, 0);
         //loop while end node isn't in the open list
         while (open.Count != 0)
         {
+            float priority;
+            Node element;
             //remove node n with lowest cost and place it in close list
-            KeyValuePair<Node, float> minNode = new KeyValuePair<Node, float>(null, -1);
-            foreach (KeyValuePair<Node, float> pair in open) {
-                if (minNode.Value == -1 || minNode.Value > pair.Value) minNode = pair;
-            }
+            do {
+                open.TryDequeue(out element, out priority);
+            } while (closed.ContainsKey(element));
+            KeyValuePair<Node, float> minNode = new KeyValuePair<Node, float>(element, priority);
             //expand the node n and add successors to open list
             //look to see if any node is the end node
             //updating any better values
             if (GreedyRelax(minNode.Key, end, open, closed, parents))
             {
                 closed.Add(minNode.Key, minNode.Value);
-                closed.Add(end, 0);
                 return GreedyRetrace(parents, closed, start, end, path);
             }
             else
             {
-                Debug.Log("YAH!");
                 GreedyRelax(minNode.Key, end, open, closed, parents);
                 closed.Add(minNode.Key, minNode.Value);
-                open.Remove(minNode.Key);
             }
         }
         return -1;
@@ -77,23 +76,22 @@ public class Graph<T>
     /**
      * @returns true when the end node is an edge
      */
-    private bool GreedyRelax(Node vertex, Node end, Dictionary<Node, float> open, Dictionary<Node, float> closed, Dictionary<Node, Node> parents) {
+    private bool GreedyRelax(Node vertex, Node end, PriorityQueue<Node, float> open, Dictionary<Node, float> closed, Dictionary<Node, KeyValuePair<Node, float>> parents) {
         foreach (Node.Edge edge in vertex.edges) {
             if (edge.neighbor == end) {
-                parents.Add(end, vertex);
+                parents.Add(end, new KeyValuePair<Node, float>(vertex, edge.weight));
+                closed.Add(end, edge.weight);
                 return true;
             }
             if (!closed.ContainsKey(edge.neighbor)) {
-                float cost;
-                bool isInOpen = open.TryGetValue(edge.neighbor, out cost);
-                if (!isInOpen){
-                    open.Add(edge.neighbor, edge.weight);
-                    parents.Add(edge.neighbor, vertex);
-                }
-                else if (edge.weight < cost) {
-                    open[edge.neighbor] = edge.weight;
-                    parents[edge.neighbor] = vertex;
-                }
+                bool alreadyProblem = closed.ContainsKey(end);
+
+                open.Enqueue(edge.neighbor, edge.weight);
+                bool containsKey = parents.ContainsKey(edge.neighbor);
+                if (containsKey && parents[edge.neighbor].Value > edge.weight) parents[edge.neighbor] = new KeyValuePair<Node, float>(vertex, edge.weight);
+                else if (!containsKey) parents.Add(edge.neighbor, new KeyValuePair<Node, float>(vertex, edge.weight));
+
+                if (closed.ContainsKey(end)) Debug.Log("hello problem! Edge.neighbor == end: " + (edge.neighbor == end) + " was it a problem before? " + alreadyProblem);
             }
         }
         return false;
@@ -103,23 +101,23 @@ public class Graph<T>
      * <summary> Creates the path that was taken during the search </summary>
      * <returns> The total cost of the path </returns>
      */
-    private float GreedyRetrace(Dictionary<Node, Node> parents, Dictionary<Node, float> cost, Node start, Node end, Stack<Node> path) {
+    private float GreedyRetrace(Dictionary<Node, KeyValuePair<Node, float>> parents, Dictionary<Node, float> cost, Node start, Node end, Stack<Node> path) {
         float totalCost = 0;
         totalCost += cost[end];
         path.Push(end);
-        Node next = parents[end];
+        Node next = parents[end].Key;
         if (!parents.ContainsKey(end)) Debug.Log("shit...");
         int i = 0;
         while (next != null) {
             try
             {
-                if (next != start) totalCost += cost[next];
+                if (next != start) totalCost += parents[next].Value;
             }
             catch (KeyNotFoundException e) {
                 Debug.LogError("i: " + i + " closed count: " + cost.Count);
             }
             path.Push(next);
-            next = parents.ContainsKey(next) ? parents[next] : null;
+            next = parents.ContainsKey(next) ? parents[next].Key : null;
             i++;
         }
 
@@ -134,57 +132,56 @@ public class Graph<T>
         //TODO: Replace hashtables with min heaps
         if (start == end) { path = new Stack<Node>(); path.Push(start); return 0; }
         //Initialize the hashmap of parents key = child, value = parent
-        Dictionary<Node, Node> parents = new Dictionary<Node, Node>();
+        Dictionary<Node, KeyValuePair<Node, float>> parents = new Dictionary<Node, KeyValuePair<Node, float>>();
         //initialize correct shortest path set (empty)
-        Dictionary<Node, float> shortP = new Dictionary<Node, float>();
+        Dictionary<Node, float> correctP = new Dictionary<Node, float>();
         //initialize estimated shortest path set (empty)
-        Dictionary<Node, float> estP = new Dictionary<Node, float>();
+        PriorityQueue<Node, float> estP = new PriorityQueue<Node, float>();
         //initialize start to have length 0 and add it to correct
-        shortP.Add(start, 0);
-        Relax(start, 0, shortP, estP, parents);
+        correctP.Add(start, 0);
+        Relax(start, 0, correctP, estP, parents);
         //loops until cost is determined for end node
-        while (!shortP.ContainsKey(end)) {
+        while (!correctP.ContainsKey(end)) {
             //find an element t with the least estimate in the estimate set
-            KeyValuePair<Node, float> smallestCost = new KeyValuePair<Node, float>(null, -1);
-            foreach (KeyValuePair<Node, float> v in estP) {
-                if (smallestCost.Key == null || v.Value < smallestCost.Value) smallestCost = v;
-            }
+            float priority;
+            Node element;
+            do
+            {
+                estP.TryDequeue(out element, out priority);
+            } while (correctP.ContainsKey(element));
+            KeyValuePair<Node, float> smallestCost = new KeyValuePair<Node, float>(element, priority);
             //add t to correct shortest path
-            shortP.Add(smallestCost.Key, smallestCost.Value);
-            estP.Remove(smallestCost.Key);
+            correctP.Add(smallestCost.Key, smallestCost.Value);
             //Relax(t)
-            Relax(smallestCost.Key, smallestCost.Value, shortP, estP, parents);
+            Relax(smallestCost.Key, smallestCost.Value, correctP, estP, parents);
         }
         float rValue;
-        bool success = shortP.TryGetValue(end, out rValue);
+        bool success = correctP.TryGetValue(end, out rValue);
         path = RetracePath(parents, end);
         return rValue;
     }
 
-    private Stack<Node> RetracePath(Dictionary<Node, Node> parents, Node end) {
+    private Stack<Node> RetracePath(Dictionary<Node, KeyValuePair<Node, float>> parents, Node end) {
         Stack<Node> path = new Stack<Node>();
         path.Push(end);
-        Node next = parents[end];
+        Node next = parents[end].Key;
         while (next != null) {
             path.Push(next);
-            next = parents.ContainsKey(next) ? parents[next] : null;
+            next = parents.ContainsKey(next) ? parents[next].Key : null;
         }
         return path;
     }
 
-    private void Relax(Node vertex, float vCost, Dictionary<Node, float> shortP, Dictionary<Node, float> estP, Dictionary<Node, Node> parents) {
+    private void Relax(Node vertex, float vCost, Dictionary<Node, float> correctP, PriorityQueue<Node, float> estP, Dictionary<Node, KeyValuePair<Node, float>> parents) {
 
         foreach (Node.Edge edge in vertex.edges) {
-            if (!shortP.ContainsKey(edge.neighbor)) {
+            if (!correctP.ContainsKey(edge.neighbor)) {
                 float estCost = vCost + edge.weight;
-                float origCost;
-                if (!estP.TryGetValue(edge.neighbor, out origCost)) {
-                    estP.Add(edge.neighbor, estCost);
-                    parents.Add(edge.neighbor, vertex);
-                } else if(origCost > estCost){
-                    estP[edge.neighbor] = estCost;
-                    parents[edge.neighbor] = vertex;
-                }
+
+                estP.Enqueue(edge.neighbor, estCost);
+                bool containsKey = parents.ContainsKey(edge.neighbor);
+                if (containsKey && parents[edge.neighbor].Value > estCost) parents[edge.neighbor] = new KeyValuePair<Node, float>(vertex, estCost);
+                else if (!containsKey) parents.Add(edge.neighbor, new KeyValuePair<Node, float>(vertex, estCost));
             }
         }
     }
