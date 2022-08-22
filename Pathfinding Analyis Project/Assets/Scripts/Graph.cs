@@ -1,6 +1,8 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using VNode = Graph<UnityEngine.Vector3Int>.Node;
 
 public class Graph<T>
 {
@@ -34,103 +36,95 @@ public class Graph<T>
         nodes.Add(node);
     }
 
-    /**
-     * <returns>-1 if there was no valid path found</returns>
-     */
-    public float GreedyFirstSearch(Node start, Node end, out Stack<Node> path) {
-        //create OPEN and CLOSED list
-        Dictionary<Node, KeyValuePair<Node, float>> parents = new Dictionary<Node, KeyValuePair<Node, float>>();
-        PriorityQueue<Node, float> open = new PriorityQueue<Node, float>();
-        Dictionary<Node, float> closed = new Dictionary<Node, float>();
-        
-        path = new Stack<Node>();
+    public float GBS(VNode start, VNode end, out Stack<VNode> path, out int tilesExplored) {
+        Dictionary<VNode, KeyValuePair<VNode, float>> parents = new Dictionary<VNode, KeyValuePair<VNode, float>>();
+        //first VNode is the node, 
+        PriorityQueue<VNode, float> open = new PriorityQueue<VNode, float>();
+        Dictionary<VNode, float> closed = new Dictionary<VNode, float>();
 
         open.Enqueue(start, 0);
-        //loop while end node isn't in the open list
-        while (open.Count != 0)
-        {
-            float priority;
-            Node element;
-            //remove node n with lowest cost and place it in close list
-            do {
-                open.TryDequeue(out element, out priority);
-            } while (closed.ContainsKey(element));
-            KeyValuePair<Node, float> minNode = new KeyValuePair<Node, float>(element, priority);
-            //expand the node n and add successors to open list
-            //look to see if any node is the end node
-            //updating any better values
-            if (GreedyRelax(minNode.Key, end, open, closed, parents))
-            {
-                closed.Add(minNode.Key, minNode.Value);
-                return GreedyRetrace(parents, closed, start, end, path);
-            }
-            else
-            {
-                GreedyRelax(minNode.Key, end, open, closed, parents);
-                closed.Add(minNode.Key, minNode.Value);
-            }
+        parents.Add(start, new KeyValuePair<VNode, float>(null, 0));
+        int i = 0;
+        while (open.Count > 0) {
+            VNode currentNode;
+            float currentHeuristic;
+            //continues to remove nodes from the queue until one that isnt already closed is found
+            do{ 
+                open.TryDequeue(out currentNode, out currentHeuristic);
+                if (currentHeuristic == float.MaxValue) Debug.LogError("GBS added an infinite cost to closed");
+            } while (closed.ContainsKey(currentNode));
+            //Next two lines marks the node as visited and adds neighbors to the open priority queue
+            closed.Add(currentNode, currentHeuristic);
+            int newTilesExplored;
+            if(MarkNode(currentNode, end, parents, closed, open)) break;
+            i++;
         }
-        return -1;
+        //if (open.Count <= 0) Debug.LogError("You made it throw " + i + " full iterations");
+        path = new Stack<VNode>();
+        tilesExplored = parents.Count;
+        return RetraceGBS(path, end, parents);
     }
 
-    /**
-     * @returns true when the end node is an edge
-     */
-    private bool GreedyRelax(Node vertex, Node end, PriorityQueue<Node, float> open, Dictionary<Node, float> closed, Dictionary<Node, KeyValuePair<Node, float>> parents) {
-        foreach (Node.Edge edge in vertex.edges) {
-            if (edge.neighbor == end) {
-                parents.Add(end, new KeyValuePair<Node, float>(vertex, edge.weight));
-                closed.Add(end, edge.weight);
-                return true;
-            }
+    private bool MarkNode(VNode node, VNode end, Dictionary<VNode, KeyValuePair<VNode, float>> parents, Dictionary<VNode, float> closed, PriorityQueue<VNode, float> open) {
+        foreach (VNode.Edge edge in node.edges) {
             if (!closed.ContainsKey(edge.neighbor)) {
-                bool alreadyProblem = closed.ContainsKey(end);
-
-                open.Enqueue(edge.neighbor, edge.weight);
-                bool containsKey = parents.ContainsKey(edge.neighbor);
-                if (containsKey && parents[edge.neighbor].Value > edge.weight) parents[edge.neighbor] = new KeyValuePair<Node, float>(vertex, edge.weight);
-                else if (!containsKey) parents.Add(edge.neighbor, new KeyValuePair<Node, float>(vertex, edge.weight));
-
-                if (closed.ContainsKey(end)) Debug.Log("hello problem! Edge.neighbor == end: " + (edge.neighbor == end) + " was it a problem before? " + alreadyProblem);
+                float cost = Vect3Heuristic(edge.neighbor, end, edge);
+                if (cost > 1_000_000) continue;
+                if (edge.neighbor == end) {
+                    parents.Add(end, new KeyValuePair<VNode, float>(node, cost));
+                    return true;
+                } else if (!parents.ContainsKey(edge.neighbor)){
+                    parents.Add(edge.neighbor, new KeyValuePair<VNode, float>(node, cost));
+                } else if (parents[edge.neighbor].Value > cost){
+                    parents[edge.neighbor] = new KeyValuePair<VNode, float>(node, cost);
+                } else{
+                    continue;
+                }
+                open.Enqueue(edge.neighbor, cost);
             }
         }
+        //Debug.Log("Queue is loaded with " + open.Count);
         return false;
     }
 
-    /**
-     * <summary> Creates the path that was taken during the search </summary>
-     * <returns> The total cost of the path </returns>
-     */
-    private float GreedyRetrace(Dictionary<Node, KeyValuePair<Node, float>> parents, Dictionary<Node, float> cost, Node start, Node end, Stack<Node> path) {
-        float totalCost = 0;
-        totalCost += cost[end];
-        path.Push(end);
-        Node next = parents[end].Key;
-        if (!parents.ContainsKey(end)) Debug.Log("shit...");
+    private float GetWeight(VNode a, VNode b) {
         int i = 0;
-        while (next != null) {
-            try
-            {
-                if (next != start) totalCost += parents[next].Value;
-            }
-            catch (KeyNotFoundException e) {
-                Debug.LogError("i: " + i + " closed count: " + cost.Count);
-            }
-            path.Push(next);
-            next = parents.ContainsKey(next) ? parents[next].Key : null;
-            i++;
+        foreach (VNode.Edge edge in a.edges) { 
+            if(edge.neighbor == b) return edge.weight;
         }
+        throw new Exception("Error: No connection found between a = " + a.GetValue() + " and b = " + b.GetValue());
+    }
 
-        return totalCost;
+    private float Vect3Heuristic(VNode node, VNode end, VNode.Edge edgeToStart) {
+        Vector3Int startPos = node.GetValue();
+        Vector3Int endPos = end.GetValue();
+        return Vector3Int.Distance(startPos, endPos) * 2 + edgeToStart.weight;
+    }
+
+    private float RetraceGBS(Stack<VNode> path, VNode end, Dictionary<VNode, KeyValuePair<VNode, float>> parents) {
+        if (!parents.ContainsKey(end)) throw new Exception("There is no end node in the parents dictionary!!!");
+        float total = 0;
+        VNode prev = end;
+        KeyValuePair<VNode, float> currentPair = parents[end];
+        while (currentPair.Key != null){
+            if (prev == currentPair.Key) Debug.LogError("Parents has self cycle");
+            if (currentPair.Value >= 100_000) Debug.LogError("An edge is infinite");
+            path.Push(prev);
+            total += GetWeight(currentPair.Key, prev);
+            prev = currentPair.Key;
+            currentPair = parents[currentPair.Key];
+        }
+        path.Push(prev);
+
+        return total;
     }
 
     /**
      * <param name="path">an out variable for storing the chosen path.</param>
      * <returns>the cost, or -1 if the path is not possible</returns>
      */
-    public float Dijkstras(Node start, Node end, out Stack<Node> path) {
-        //TODO: Replace hashtables with min heaps
-        if (start == end) { path = new Stack<Node>(); path.Push(start); return 0; }
+    public float Dijkstras(Node start, Node end, out Stack<Node> path, out int tilesExplored) {
+        if (start == end) { path = new Stack<Node>(); path.Push(start); tilesExplored = 1; return 0; }
         //Initialize the hashmap of parents key = child, value = parent
         Dictionary<Node, KeyValuePair<Node, float>> parents = new Dictionary<Node, KeyValuePair<Node, float>>();
         //initialize correct shortest path set (empty)
@@ -158,6 +152,7 @@ public class Graph<T>
         float rValue;
         bool success = correctP.TryGetValue(end, out rValue);
         path = RetracePath(parents, end);
+        tilesExplored = parents.Count;
         return rValue;
     }
 

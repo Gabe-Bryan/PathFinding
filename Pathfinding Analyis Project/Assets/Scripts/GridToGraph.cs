@@ -12,6 +12,7 @@ public class GridToGraph : MonoBehaviour
     //Types vectNode = Graph<Vector3Int>.Node<Vector3Int>;
 
     private Graph<Vector3Int> myGraph;
+    private Tilemap tilemap;
     private Vector2 size;
     private Dictionary<Vector3Int, Node> nodes;
 
@@ -21,8 +22,14 @@ public class GridToGraph : MonoBehaviour
 
     private Stopwatch greedyStopwatch;
     private Stopwatch dijkstraStopwatch;
+    private Stack<int> greedyTilesExplored;
+    private Stack<int> dijkstraTilesExplored;
+    private Stack<float> greedyCosts;
+    private Stack<float> dijkstraCosts;
 
     bool processing = false;
+
+    int count = 0;
 
     private void Start()
     {
@@ -30,18 +37,22 @@ public class GridToGraph : MonoBehaviour
         SetUpProcessOrder();
         greedyStopwatch = new Stopwatch();
         dijkstraStopwatch = new Stopwatch();
-        ///Debug.Log("Number of Vertices: " + nodes.Count);
+        greedyTilesExplored = new Stack<int>();
+        dijkstraTilesExplored = new Stack<int>();
+        greedyCosts = new Stack<float>();
+        dijkstraCosts = new Stack<float>();
+        Debug.Log("Number of Vertices: " + nodes.Count);
         //RunExample();
     }
 
     private void Update()
     {
-        if (processing && greedyStopwatch != null && dijkstraStopwatch != null) TestNextPath();
+        if (processing && greedyStopwatch != null && dijkstraStopwatch != null) for(int i = 1; i < 5; i++)TestNextPath();
         else if (processing && (greedyStopwatch == null || dijkstraStopwatch == null)) Debug.LogError("A stopwatch is set to null!");
     }
 
     private Graph<Vector3Int> GenerateGraph() {
-        Tilemap tilemap = gameObject.GetComponentInChildren<Tilemap>();
+        tilemap = gameObject.GetComponentInChildren<Tilemap>();
         size = tilemap.cellSize;
 
         myGraph = new Graph<Vector3Int>(new ArrayList());
@@ -64,12 +75,13 @@ public class GridToGraph : MonoBehaviour
         processing = true;
     }
     private void TestNextPath() {
-        Debug.Log("Testing...");
         //finished case
         if (startHere == null) {
-            Debug.Log("Dijkstra's took " + dijkstraStopwatch.ElapsedMilliseconds + " milis");
-            Debug.Log("Greedy first search took " + greedyStopwatch.ElapsedMilliseconds + " milis");
-            processing = false;
+            Debug.Log("Dijkstra's took " + dijkstraStopwatch.ElapsedMilliseconds + " milis, had an average cost of " + FindAverage(dijkstraCosts) + ", and had an average tiles explored of " + FindIntAverage(dijkstraTilesExplored));
+            Debug.Log("Greedy first search took " + greedyStopwatch.ElapsedMilliseconds + " milis, had an average cost of " + FindAverage(greedyCosts) + ", and had an average tiles explored of " + FindIntAverage(greedyTilesExplored));
+            count++;
+            processing = count < 1;
+            if (processing) Start();
         }
         //finished with start node case
         if (endHere == null) {
@@ -77,21 +89,27 @@ public class GridToGraph : MonoBehaviour
             endHere = processOrder.First;
         }
         if (endHere != null && startHere != null) {
+            if (tilemap.GetTile(startHere.Value.GetValue()).name == "Mountain" || tilemap.GetTile(endHere.Value.GetValue()).name == "Mountain") { Debug.Log("Damn mountain!"); endHere = endHere.Next; if (endHere != null && startHere.Value == endHere.Value) endHere = endHere.Next; return; }
+
+            Debug.Log("Testing...");
+
             Stack<Node> path;
 
             dijkstraStopwatch.Start();
-            myGraph.Dijkstras(startHere.Value, endHere.Value, out path);
+            int dijkstraTiles;
+            dijkstraCosts.Push(myGraph.Dijkstras(startHere.Value, endHere.Value, out path, out dijkstraTiles));
+            dijkstraTilesExplored.Push(dijkstraTiles);
             dijkstraStopwatch.Stop();
 
             greedyStopwatch.Start();
-            myGraph.GreedyFirstSearch(startHere.Value, endHere.Value, out path);
+            int greedyTiles;
+            greedyCosts.Push(myGraph.GBS(startHere.Value, endHere.Value, out path, out greedyTiles));
+            greedyTilesExplored.Push(greedyTiles);
             greedyStopwatch.Stop();
 
             endHere = endHere.Next;
-            if (endHere != null && startHere.Value == endHere.Value)
-            {
-                endHere = endHere.Next;
-            }
+            //ensure endhere and starthere are not the same node
+            if (endHere != null && startHere.Value == endHere.Value) endHere = endHere.Next;
         }
     }
     
@@ -196,8 +214,9 @@ public class GridToGraph : MonoBehaviour
             case "Water": return 0.5f;
             case "Road": return 0.5f;
             case "Grass": return 1.0f;
-            case "Desert": return 2.0f;
-            case "Forest": return 3.0f;
+            case "Desert": return 3.0f;
+            case "Forest": return 5.0f;
+            case "Mountain": return float.MaxValue;
             case "Random": return Random.value * 100;
             default: return 1000000000000;
         }
@@ -214,7 +233,8 @@ public class GridToGraph : MonoBehaviour
 
     private void RunExample() {
         Stack<Node> path;
-        float dijkstraCost = myGraph.Dijkstras(nodes[new Vector3Int(1, -9, 0)], nodes[new Vector3Int(1, 9, 0)], out path);
+        int dTilesExplored;
+        float dijkstraCost = myGraph.Dijkstras(nodes[new Vector3Int(1, -9, 0)], nodes[new Vector3Int(1, 9, 0)], out path, out dTilesExplored);
         string pathString = path.Count != 0 ? path.Pop().GetValue().ToString() : "";
         while (path.Count != 0)
         {
@@ -222,13 +242,32 @@ public class GridToGraph : MonoBehaviour
         }
         Debug.Log("Dijkstra got a total cost of: " + dijkstraCost + "\nPath Taken: " + pathString);
 
-
-        float greedyCost = myGraph.GreedyFirstSearch(nodes[new Vector3Int(1, -9, 0)], nodes[new Vector3Int(1, 9, 0)], out path);
+        int gTilesExplored;
+        float greedyCost = myGraph.GBS(nodes[new Vector3Int(1, -9, 0)], nodes[new Vector3Int(1, 9, 0)], out path, out gTilesExplored);
         pathString = path.Count != 0 ? path.Pop().GetValue().ToString() : "";
         while (path.Count != 0)
         {
             pathString += ", " + path.Pop().GetValue().ToString();
         }
         Debug.Log("GFS got a total cost of: " + greedyCost + "\nPath Taken: " + pathString);
+    }
+
+    private float FindAverage(Stack<float> items) {
+        int count = items.Count;
+        float total = 0;
+        while (items.Count > 0) {
+            float next = items.Pop();
+            if (next == float.MaxValue) Debug.LogError("An infinite cost was found");
+            total += next;
+        }
+        return total / count;
+    }
+
+    private float FindIntAverage(Stack<int> items) {
+        int count = items.Count;
+        float total = 0;
+        while (items.Count > 0)
+            total += items.Pop();
+        return total / count;
     }
 }

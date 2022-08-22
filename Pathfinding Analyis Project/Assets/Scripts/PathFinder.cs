@@ -85,8 +85,8 @@ public class PathFinder : MonoBehaviour
 
         //Debug.Log(((Node)nodeList[0]).edges.Count);
         Stack<Node> pathChosen;
-        Debug.Log("cost: " + graph.Dijkstras(nodes[0], nodes[5], out pathChosen));
-        Debug.Log("greedy cost: " + graph.GreedyFirstSearch(nodes[0], nodes[5], out pathChosen));
+        //Debug.Log("dijkstra test cost: " + graph.Dijkstras(nodes[0], nodes[5], out pathChosen, null));
+        //Debug.Log("greedy test cost: " + graph.GBS(nodes[0], nodes[5], out pathChosen));
 
         return graph;
     }
